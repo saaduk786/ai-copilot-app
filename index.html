@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Response Co-Pilot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #eef2f8;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+        }
+        .container {
+            width: 100%;
+            max-width: 420px; /* Optimized for mobile width */
+            background-color: #ffffff;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border-radius: 0.75rem;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+        }
+        .step-card {
+            border: 1px solid #e0e7ff;
+            background-color: #f9fafb;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+        }
+        .step-card.active {
+            border-color: #4f46e5;
+            background-color: #eef2ff;
+        }
+        .suggestion-box {
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .suggestion-box:active {
+            background-color: #d1d5db; /* Darker click effect */
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="container p-6">
+        <h1 class="text-3xl font-extrabold text-indigo-700 mb-2 text-center">AI Chat Co-Pilot</h1>
+        <p class="text-gray-500 mb-6 text-center text-sm">Instant replies for personal DMs and marketplace inquiries.</p>
+
+        <!-- PII Warning -->
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-6 rounded-lg text-xs">
+            <p class="font-semibold">⚠️ PII Warning:</p>
+            <p>Do not upload sensitive payment info. Data is processed for text extraction only, then securely deleted.</p>
+        </div>
+
+        <!-- Co-Pilot Toggle Button -->
+        <div class="flex justify-between items-center bg-gray-100 p-4 rounded-xl mb-6 shadow-sm">
+            <span class="text-lg font-semibold text-gray-800">Co-Pilot Status</span>
+            <button id="toggleBtn" onclick="toggleMode()" class="px-4 py-2 rounded-full font-bold transition duration-200 bg-gray-300 text-gray-700 hover:bg-gray-400">
+                OFF
+            </button>
+        </div>
+
+        <!-- Step-by-Step Instructions Area -->
+        <div id="instructionsArea" class="space-y-4">
+            <h2 class="text-xl font-bold text-gray-800">How to Use:</h2>
+            
+            <div id="step1" class="step-card p-4 shadow-md active">
+                <span class="font-bold text-indigo-600">Step 1: Activate</span>
+                <p class="text-sm text-gray-600 mt-1">Tap the button above to turn the Co-Pilot **ON**.</p>
+            </div>
+            
+            <div id="step2" class="step-card p-4 shadow-md">
+                <span class="font-bold text-gray-400">Step 2: Capture Chat</span>
+                <p class="text-sm text-gray-600 mt-1">Go to your Messenger/WhatsApp and take a **full-screen screenshot** of the conversation.</p>
+            </div>
+
+            <div id="step3" class="step-card p-4 shadow-md">
+                <span class="font-bold text-gray-400">Step 3: Upload & Analyze</span>
+                <p class="text-sm text-gray-600 mt-1">Tap the upload box below and select the screenshot you just took.</p>
+            </div>
+        </div>
+
+        <!-- File Input Area (Visible only when toggled ON) -->
+        <div id="uploadContainer" class="mt-8 hidden">
+            <label for="chatScreenshot" class="block text-lg font-medium text-gray-700 mb-2">
+                Upload Latest Screenshot
+            </label>
+            <input type="file" id="chatScreenshot" accept="image/*" onchange="processImage()" class="w-full text-gray-700 border border-indigo-500 rounded-lg p-3 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-600 hover:file:bg-indigo-100 cursor-pointer" />
+        </div>
+
+        <!-- Processing/Status -->
+        <div id="processStatus" class="mt-6 flex items-center justify-center space-x-3 hidden">
+            <div id="loader" class="loader"></div>
+            <span id="statusText" class="text-indigo-600 font-semibold">Processing Screenshot...</span>
+        </div>
+        
+        <p id="statusMessage" class="mt-4 text-sm font-medium text-red-600 h-5 text-center"></p>
+
+        <!-- Suggested Responses Area (Pop-up replacement) -->
+        <div id="suggestionsArea" class="mt-8 hidden">
+            <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">3. Suggestions Ready: (Auto-Copied!)</h2>
+        </div>
+
+    </div>
+
+    <script>
+        // NOTE: REPLACE THIS PLACEHOLDER WITH YOUR LIVE MAKE WEBHOOK URL
+        const MAKE_WEBHOOK_URL = "YOUR_MAKE_WEBHOOK_URL_HERE"; 
+        
+        const screenshotInput = document.getElementById('chatScreenshot');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const uploadContainer = document.getElementById('uploadContainer');
+        const instructionsArea = document.getElementById('instructionsArea');
+        const processStatus = document.getElementById('processStatus');
+        const statusText = document.getElementById('statusText');
+        const statusMessage = document.getElementById('statusMessage');
+        const suggestionsArea = document.getElementById('suggestionsArea');
+
+        let isCopilotActive = false;
+
+        // --- Utility Functions ---
+
+        function setLoading(isLoading, message = 'Analyzing Screenshot...') {
+            processStatus.classList.toggle('hidden', !isLoading);
+            statusText.textContent = message;
+            statusMessage.textContent = '';
+            uploadContainer.style.pointerEvents = isLoading ? 'none' : 'auto';
+            
+            document.getElementById('step3').classList.toggle('active', isLoading);
+            document.getElementById('step2').classList.remove('active'); 
+        }
+
+        function getBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]); 
+                reader.onerror = error => reject(error);
+            });
+        }
+        
+        function setStepActive(stepId) {
+            document.querySelectorAll('.step-card').forEach(card => card.classList.remove('active'));
+            document.getElementById(stepId).classList.add('active');
+        }
+
+        // --- Core Application Logic ---
+
+        function toggleMode() {
+            isCopilotActive = !isCopilotActive;
+            suggestionsArea.classList.add('hidden');
+            
+            if (isCopilotActive) {
+                if (MAKE_WEBHOOK_URL === "YOUR_MAKE_WEBHOOK_URL_HERE") {
+                    statusMessage.textContent = "Configuration Error: Webhook URL is missing in the code.";
+                    toggleBtn.disabled = true;
+                    return;
+                }
+                
+                toggleBtn.textContent = 'ON';
+                toggleBtn.classList.remove('bg-gray-300', 'text-gray-700');
+                toggleBtn.classList.add('bg-indigo-600', 'text-white');
+                uploadContainer.classList.remove('hidden');
+                setStepActive('step2'); 
+            } else {
+                toggleBtn.textContent = 'OFF';
+                toggleBtn.classList.add('bg-gray-300', 'text-gray-700');
+                toggleBtn.classList.remove('bg-indigo-600', 'text-white');
+                uploadContainer.classList.add('hidden');
+                setStepActive('step1'); 
+                setLoading(false);
+            }
+        }
+
+        async function processImage() {
+            const file = screenshotInput.files[0];
+            if (!file) return;
+
+            setLoading(true, 'Extracting text and analyzing intent...');
+            
+            try {
+                const base64Image = await getBase64(file);
+
+                const payload = {
+                    base64Image: base64Image,
+                    mimeType: file.type,
+                };
+
+                // --- Send to Make Webhook ---
+                const response = await fetch(MAKE_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Make Webhook failed with status: ${response.status}. Check Make logs.`);
+                }
+                
+                const result = await response.json(); 
+                
+                // Final response from Make should contain the key "suggestions"
+                const finalSuggestions = result.suggestions;
+                
+                // MOCK RESPONSE for initial testing before Make is fully connected:
+                /*
+                const mockSuggestions = [
+                    "1. Yes, the weekly rate is $1,200, and the monthly rate is $4,500. Are you looking for specific dates?",
+                    "2. We currently have availability starting next Monday. Which dates work best for your group?",
+                    "3. Yes, pets are allowed with a $50 non-refundable fee. Would you like me to send the full booking link?"
+                ];
+                const finalSuggestions = mockSuggestions.join('\n');
+                */
+
+                if (!finalSuggestions) {
+                    throw new Error("Make scenario did not return a 'suggestions' field.");
+                }
+                
+                displaySuggestions(finalSuggestions);
+
+            } catch (error) {
+                console.error("Processing error:", error);
+                statusMessage.textContent = "An error occurred. Check console & confirm Make webhook is running.";
+            } finally {
+                setLoading(false);
+                setStepActive(isCopilotActive ? 'step2' : 'step1'); 
+            }
+        }
+
+        async function displaySuggestions(responseText) {
+            const suggestions = responseText.split('\n').filter(s => s.trim().length > 0 && s.match(/^\d+\./));
+            const container = document.createElement('div');
+            container.className = 'space-y-3';
+            
+            if (suggestions.length > 0) {
+                // 1. Automatically copy the best (first) suggestion to the clipboard
+                const firstSuggestionText = suggestions[0].replace(/^\d+\.\s*/, '').trim();
+                
+                try {
+                    await navigator.clipboard.writeText(firstSuggestionText);
+                    statusMessage.textContent = `✅ Best suggestion copied! (Tap to paste into chat)`;
+                    statusMessage.classList.remove('text-red-600');
+                    statusMessage.classList.add('text-green-600');
+                } catch (err) {
+                    // Fallback for security-restricted environments
+                    statusMessage.textContent = "✅ Suggestions generated. Copy manually.";
+                    statusMessage.classList.remove('text-green-600');
+                    statusMessage.classList.add('text-red-600');
+                }
+
+                // 2. Display all suggestions in the app pop-up area
+                suggestions.forEach((suggestion, index) => {
+                    const textOnly = suggestion.replace(/^\d+\.\s*/, '').trim();
+                    const box = document.createElement('div');
+                    box.className = 'suggestion-box p-4 bg-white border border-gray-300 rounded-lg shadow-sm text-gray-800 text-sm';
+                    box.innerHTML = `<span class="font-bold text-indigo-600 mr-1">${index + 1}.</span> ${textOnly}`;
+                    
+                    // Add secondary click-to-copy handler if user wants a different suggestion
+                    box.onclick = async () => {
+                         try {
+                            await navigator.clipboard.writeText(textOnly);
+                            statusMessage.textContent = `Suggestion ${index + 1} copied!`;
+                            statusMessage.classList.remove('text-red-600');
+                            statusMessage.classList.add('text-green-600');
+                         } catch (e) {
+                            statusMessage.textContent = `Suggestion ${index + 1} generated. Copy manually.`;
+                         }
+                    };
+
+                    container.appendChild(box);
+                });
+
+                suggestionsArea.innerHTML = '';
+                suggestionsArea.appendChild(container);
+                suggestionsArea.classList.remove('hidden');
+                
+            } else {
+                 statusMessage.textContent = "AI could not generate suggestions. Try a clearer screenshot.";
+            }
+        }
+
+        window.onload = () => {
+             // Initial check of webhook configuration
+             if (MAKE_WEBHOOK_URL === "YOUR_MAKE_WEBHOOK_URL_HERE") {
+                statusMessage.textContent = "Configuration Error: Webhook URL is missing in the code.";
+                toggleBtn.disabled = true;
+             }
+        };
+
+    </script>
+</body>
+</html>
